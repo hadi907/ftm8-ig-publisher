@@ -3,13 +3,15 @@
 Runs on GitHub Actions. Reads schedule.json, publishes every post whose time
 has come, and writes the result back to schedule.json.
 
-Secrets (repo Settings > Secrets and variables > Actions):
-  IG_TOKEN    - access token (Page token via graph.facebook.com, or
-                Instagram-login token via graph.instagram.com)
-  IG_USER_ID  - Instagram professional account ID
-Optional variable:
-  IG_API_HOST - graph.facebook.com (default) or graph.instagram.com
+Secret (repo Settings > Secrets and variables > Actions):
+  IG_TOKEN - Instagram-login access token (from the Meta app dashboard)
+
+The token lives 60 days. The workflow refreshes it automatically and keeps the
+fresh copy encrypted in token.enc (key derived from the IG_TOKEN secret), so the
+secret never has to be updated by hand.
 """
+import base64
+import hashlib
 import io
 import json
 import os
@@ -19,15 +21,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from cryptography.fernet import Fernet
 from PIL import Image
 
 ROOT = Path(__file__).parent
 SCHEDULE = ROOT / "schedule.json"
 MEDIA_DIR = ROOT / "media"
 API_VERSION = "v23.0"
-HOST = os.environ.get("IG_API_HOST") or "graph.facebook.com"
-TOKEN = os.environ.get("IG_TOKEN", "")
-IG_USER = os.environ.get("IG_USER_ID", "")
+HOST = os.environ.get("IG_API_HOST") or "graph.instagram.com"
+SECRET = os.environ.get("IG_TOKEN", "")
+IG_USER = os.environ.get("IG_USER_ID") or "17841480052027826"  # ftm8.__
+TOKEN_FILE = ROOT / "token.enc"
+REFRESH_EVERY = timedelta(days=7)
 REPO = os.environ.get("GITHUB_REPOSITORY", "hadi907/ftm8-ig-publisher")
 BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/"
@@ -36,6 +41,45 @@ PREPARE_AHEAD = timedelta(hours=36)
 KW = timezone(timedelta(hours=3))
 
 API = f"https://{HOST}/{API_VERSION}"
+
+
+# ---------- token storage ----------
+def _fernet():
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(SECRET.encode()).digest()))
+
+
+def load_token():
+    """Latest token: the encrypted refreshed copy if present, else the secret."""
+    if SECRET and TOKEN_FILE.exists():
+        try:
+            data = json.loads(_fernet().decrypt(TOKEN_FILE.read_bytes()))
+            return data["token"], datetime.fromisoformat(data["refreshed"])
+        except Exception as e:
+            log("token.enc unreadable, using secret:", e)
+    return SECRET, None
+
+
+def refresh_token_if_needed():
+    global TOKEN
+    tok, refreshed = load_token()
+    TOKEN = tok
+    if not tok:
+        return
+    now = datetime.now(timezone.utc)
+    if refreshed and now - refreshed < REFRESH_EVERY:
+        return
+    r = requests.get("https://graph.instagram.com/refresh_access_token",
+                     params={"grant_type": "ig_refresh_token", "access_token": tok}, timeout=60).json()
+    if "access_token" not in r:
+        log("token refresh failed:", r.get("error", r))
+        return
+    TOKEN = r["access_token"]
+    TOKEN_FILE.write_bytes(_fernet().encrypt(json.dumps(
+        {"token": TOKEN, "refreshed": now.isoformat()}).encode()))
+    log("token refreshed")
+
+
+TOKEN = ""
 VIDEO_EXT = (".mp4", ".mov")
 
 
@@ -168,9 +212,11 @@ def main():
         if os.environ.get("GITHUB_ACTIONS"):
             os.system('git add -A && git commit -qm "prepare media" && git push -q')
 
-    if not TOKEN or not IG_USER:
-        log("IG_TOKEN / IG_USER_ID not set - dry run only")
+    if not SECRET:
+        log("IG_TOKEN not set - dry run only")
         return
+    refresh_token_if_needed()
+    dirty = True if TOKEN_FILE.exists() else dirty
 
     for post in data["posts"]:
         if post.get("status", "pending") != "pending":
@@ -204,6 +250,7 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "check":
-        log(json.dumps(api("GET", IG_USER, fields="username,followers_count"), ensure_ascii=False))
+        refresh_token_if_needed()
+        log(json.dumps(api("GET", "me", fields="user_id,username,followers_count"), ensure_ascii=False))
     else:
         main()

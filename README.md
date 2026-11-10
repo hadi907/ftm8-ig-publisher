@@ -24,10 +24,11 @@
 - `media`: مسار داخل المستودع أو رابط عام
 - الحالة تتغير تلقائياً إلى `published` أو `error` أو `skipped`
 
-## الأسرار المطلوبة
+## السر المطلوب
 Settings → Secrets and variables → Actions:
 - `IG_TOKEN`
-- `IG_USER_ID`
+
+يتجدد المفتاح تلقائياً كل أسبوع، وتُحفظ النسخة الجديدة مشفّرة في `token.enc`.
 
 ## تجربة المفتاح
 Actions → Publish Instagram posts → Run workflow → mode = `check`
