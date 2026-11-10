@@ -35,6 +35,8 @@ REFRESH_EVERY = timedelta(days=7)
 REPO = os.environ.get("GITHUB_REPOSITORY", "hadi907/ftm8-ig-publisher")
 BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/"
+_owner, _name = REPO.split("/")
+PAGES_BASE = f"https://{_owner}.github.io/{_name}/"  # serves video/mp4 with the right type
 MAX_LATE = timedelta(hours=12)   # skip posts that are this late
 PREPARE_AHEAD = timedelta(hours=36)
 KW = timezone(timedelta(hours=3))
@@ -141,7 +143,9 @@ def prepare_media(post):
 
 
 def public_url(m):
-    return m if m.startswith("http") else RAW_BASE + m
+    if m.startswith("http"):
+        return m
+    return (PAGES_BASE if is_video(m) else RAW_BASE) + m
 
 
 # ---------- Graph API ----------
