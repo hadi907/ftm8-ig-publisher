@@ -4,11 +4,10 @@ Runs on GitHub Actions. Reads schedule.json, publishes every post whose time
 has come, and writes the result back to schedule.json.
 
 Secret (repo Settings > Secrets and variables > Actions):
-  IG_TOKEN - Instagram-login access token (from the Meta app dashboard)
-
-The token lives 60 days. The workflow refreshes it automatically and keeps the
-fresh copy encrypted in token.enc (key derived from the IG_TOKEN secret), so the
-secret never has to be updated by hand.
+  IG_TOKEN - long-lived access token with instagram_basic +
+             instagram_content_publish (valid ~60 days, renew before expiry)
+Optional variable IG_API_HOST=graph.instagram.com switches to an
+Instagram-login token, which this script then refreshes automatically.
 """
 import base64
 import hashlib
@@ -28,7 +27,7 @@ ROOT = Path(__file__).parent
 SCHEDULE = ROOT / "schedule.json"
 MEDIA_DIR = ROOT / "media"
 API_VERSION = "v23.0"
-HOST = os.environ.get("IG_API_HOST") or "graph.instagram.com"
+HOST = os.environ.get("IG_API_HOST") or "graph.facebook.com"
 SECRET = os.environ.get("IG_TOKEN", "")
 IG_USER = os.environ.get("IG_USER_ID") or "17841480052027826"  # ftm8.__
 TOKEN_FILE = ROOT / "token.enc"
@@ -65,6 +64,8 @@ def refresh_token_if_needed():
     TOKEN = tok
     if not tok:
         return
+    if HOST != "graph.instagram.com":
+        return  # Facebook long-lived tokens are renewed by hand (60 days)
     now = datetime.now(timezone.utc)
     if refreshed and now - refreshed < REFRESH_EVERY:
         return
@@ -251,6 +252,12 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         refresh_token_if_needed()
-        log(json.dumps(api("GET", "me", fields="user_id,username,followers_count"), ensure_ascii=False))
+        log(json.dumps(api("GET", IG_USER, fields="username,followers_count"), ensure_ascii=False))
+        if HOST == "graph.facebook.com":
+            d = requests.get(f"{API}/debug_token", params={"input_token": TOKEN, "access_token": TOKEN},
+                             timeout=60).json().get("data", {})
+            exp = d.get("expires_at") or d.get("data_access_expires_at")
+            if exp:
+                log("token expires:", datetime.fromtimestamp(exp, KW).date())
     else:
         main()
