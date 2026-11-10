@@ -203,6 +203,7 @@ def main():
     data = load()
     now = datetime.now(timezone.utc)
     dirty = False
+    failures = []
 
     for post in data["posts"]:
         if post.get("status", "pending") != "pending":
@@ -232,6 +233,7 @@ def main():
         if now - t > MAX_LATE:
             post["status"] = "skipped"
             post["error"] = "too late to publish"
+            failures.append(f"{post['id']} ({post['time']}): لم يُنشر لأن موعده فات بأكثر من 12 ساعة")
             dirty = True
             continue
         log(f"publishing {post['id']} ({post['time']})")
@@ -246,11 +248,15 @@ def main():
             post["error"] = str(e)[:300]
             if post["attempts"] >= 3:
                 post["status"] = "error"
+                failures.append(f"{post['id']} ({post['time']}): فشل النشر بعد 3 محاولات - {post['error']}")
             log("  failed:", e)
         dirty = True
 
     if dirty:
         save(data)
+    if failures:
+        # picked up by the workflow's "Report failures" step -> GitHub emails the owner
+        (ROOT / "failures.txt").write_text("\n".join(failures) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

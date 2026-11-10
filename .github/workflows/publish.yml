@@ -30,6 +30,7 @@ jobs:
           git config user.name "ig-publisher"
           git config user.email "actions@users.noreply.github.com"
       - name: Publish
+        id: publish
         env:
           IG_TOKEN: ${{ secrets.IG_TOKEN }}
           IG_API_HOST: ${{ vars.IG_API_HOST }}
@@ -40,6 +41,20 @@ jobs:
             python publish.py
           fi
       - name: Save results
+        if: always()
         run: |
-          git add -A
+          git add -A -- . ':!failures.txt'
+          git reset -q failures.txt 2>/dev/null || true
           git diff --cached --quiet || (git commit -qm "update schedule [skip ci]" && git pull -q --rebase && git push -q)
+      - name: Report failures
+        if: always()
+        run: |
+          if [ "${{ steps.publish.outcome }}" = "failure" ]; then
+            echo "## ❌ تعطل الناشر" >> "$GITHUB_STEP_SUMMARY"; exit 1
+          fi
+          if [ -f failures.txt ]; then
+            echo "## ❌ منشورات انستغرام لم تُنشر" >> "$GITHUB_STEP_SUMMARY"
+            sed 's/^/- /' failures.txt >> "$GITHUB_STEP_SUMMARY"
+            cat failures.txt
+            exit 1
+          fi
