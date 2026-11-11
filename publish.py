@@ -197,14 +197,29 @@ def wait_ready(cid, tries=40):
     raise RuntimeError("media processing timed out")
 
 
+def upload_reel(media, caption):
+    """Resumable upload: send the video bytes directly instead of letting Meta fetch a URL."""
+    if media.startswith("http"):
+        r = requests.get(media, timeout=180); r.raise_for_status(); data = r.content
+    else:
+        data = (ROOT / media).read_bytes()
+    init = api("POST", f"{IG_USER}/media", media_type="REELS", upload_type="resumable",
+               caption=caption, share_to_feed="true")
+    cid, uri = init["id"], init.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{API_VERSION}/{init['id']}"
+    up = requests.post(uri, data=data, timeout=600, headers={
+        "Authorization": f"OAuth {TOKEN}", "offset": "0", "file_size": str(len(data))}).json()
+    if not up.get("success"):
+        raise RuntimeError(f"video upload failed: {up}")
+    return cid
+
+
 def publish(post):
     urls = [public_url(m) for m in post["media"]]
     caption = post.get("caption", "")
     kind = post.get("type") or ("REEL" if is_video(urls[0]) else ("CAROUSEL" if len(urls) > 1 else "IMAGE"))
 
     if kind == "REEL":
-        cid = api("POST", f"{IG_USER}/media", media_type="REELS", video_url=urls[0],
-                  caption=caption, share_to_feed="true")["id"]
+        cid = upload_reel(post["media"][0], caption)
     elif kind == "CAROUSEL":
         children = []
         for u in urls:
