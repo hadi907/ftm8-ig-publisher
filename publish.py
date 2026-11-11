@@ -180,7 +180,9 @@ def api(method, path, **params):
                          params=params if method == "GET" else None, timeout=120)
     js = r.json()
     if "error" in js:
-        raise RuntimeError(js["error"].get("message", str(js["error"])))
+        e = js["error"]
+        detail = " | ".join(str(e[k]) for k in ("message", "code", "error_subcode", "error_user_title", "error_user_msg") if e.get(k))
+        raise RuntimeError(detail)
     return js
 
 
