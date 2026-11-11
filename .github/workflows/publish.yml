@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -q requests pillow cryptography
+      - run: pip install -q requests pillow cryptography && (which ffmpeg || sudo apt-get install -y -qq ffmpeg)
       - name: Configure git
         run: |
           git config user.name "ig-publisher"

@@ -84,6 +84,7 @@ def refresh_token_if_needed():
 
 TOKEN = ""
 VIDEO_EXT = (".mp4", ".mov")
+JUST_PREPARED = set()
 
 
 def log(*a):
@@ -115,7 +116,31 @@ def prepare_media(post):
     new = []
     for i, m in enumerate(post["media"]):
         if is_video(m):
-            new.append(m)
+            if not m.startswith("http"):
+                new.append(m)
+                continue
+            # external video -> re-encode to Instagram's Reels spec and host it on GitHub Pages
+            try:
+                r = requests.get(m, timeout=180)
+                r.raise_for_status()
+                MEDIA_DIR.mkdir(exist_ok=True)
+                src = ROOT / f"_src_{post['id']}_{i}"
+                src.write_bytes(r.content)
+                name = f"media/{post['id']}_{i + 1}.mp4"
+                rc = os.system(
+                    f'ffmpeg -v error -y -i "{src}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,'
+                    f'pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p" -c:v libx264 -preset veryfast '
+                    f'-crf 23 -maxrate 6M -bufsize 12M -c:a aac -b:a 128k -ar 44100 -movflags +faststart "{ROOT / name}"')
+                src.unlink()
+                if rc != 0:
+                    raise RuntimeError("ffmpeg failed")
+                new.append(name)
+                changed = True
+                JUST_PREPARED.add(post["id"])
+                log(f"  prepared video {m} -> {name}")
+            except Exception as e:
+                log(f"  could not prepare video {m}: {e}")
+                new.append(m)
             continue
         local = not m.startswith("http")
         if local and m.lower().endswith((".jpg", ".jpeg")):
@@ -235,6 +260,9 @@ def main():
             post["error"] = "too late to publish"
             failures.append(f"{post['id']} ({post['time']}): لم يُنشر لأن موعده فات بأكثر من 12 ساعة")
             dirty = True
+            continue
+        if post["id"] in JUST_PREPARED:
+            log(f"waiting for Pages to serve new media of {post['id']}")
             continue
         log(f"publishing {post['id']} ({post['time']})")
         try:
